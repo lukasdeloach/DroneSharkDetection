@@ -1,3 +1,4 @@
+# Author - Lukas DeLoach
 class LifeGuardStand:
     def __init__(self, name, latitude, longitude):
         self.name = name

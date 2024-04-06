@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+# Author - Lukas DeLoach
 import math
 
 import asyncio
