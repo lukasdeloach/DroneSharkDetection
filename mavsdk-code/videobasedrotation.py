@@ -20,6 +20,21 @@ initial_lng = -80.897632
 # Number of lifeguard stands to populate
 num_stands = 10
 
+# Determine the total number of frames in the video
+vidcap = cv2.VideoCapture('../images/shark.mp4')
+fps = 30
+total_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+# Calculate the duration of the video in seconds
+video_duration_seconds = total_frames / fps  # Assuming 'fps' is the frame rate of the video
+
+# Calculate the time interval between frames for 30 FPS
+time_interval = 1 / 30  # seconds
+print(video_duration_seconds)
+
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='../best.pt')
+
+
 async def run():
     """ Does Offboard control using position NED coordinates. """
     
@@ -62,33 +77,53 @@ async def run():
     print("-- Go 0m North, 0m East, -5m Down \
             within local coordinate system, turn to face east.")
     await drone.offboard.set_position_ned(
-            PositionNedYaw(0.0, 0.0, -5.0, 80.0))
-    await asyncio.sleep(5)
+            PositionNedYaw(0.0, 0.0, -10.0, 80.0))
+    await asyncio.sleep(8)
     await print_lat_lng(drone)
 
-    update_location(0)
-    
+    # Go east out to ocean first
     print("-- Go 0m North, 7500m East, -5m Down \
             within local coordinate system, Turn to face the north")
     await drone.offboard.set_position_ned(
-            PositionNedYaw(0.0, 7500.0, -5.0, 80.0))
-    await asyncio.sleep(17)
+            PositionNedYaw(0.0, 7500.0, -10.0, 80.0))
+    await asyncio.sleep(12)
     await print_lat_lng(drone)
 
-    print("-- Go 10000m North, 0m East, -5m Down \
-            within local coordinate system, turn to face east.")
-    await drone.offboard.set_position_ned(
-            PositionNedYaw(100000000000.0, 0, -5.0, 0.0))
-    await asyncio.sleep(100)
-    await print_lat_lng(drone)
-   
+    elapsed_time = 0
+    initial_location = await update_location(elapsed_time)
+    drone_latitude = initial_location[1]
+    drone_longitude = initial_location[2]
+    print()
+    angle = 90+math.degrees(math.atan2(drone_latitude, drone_longitude))
 
-    # print("-- Go 0m North, 200m East, -5m Down \
-    #         within local coordinate system, turn to face North.")
-    # await drone.offboard.set_position_ned(
-    #         PositionNedYaw(0, 5000, -5.0, 0.0))
-    # await asyncio.sleep(10)
-    # await print_lat_lng(drone)
+    print(f"-- Turn to face {angle}")
+    await drone.offboard.set_velocity_ned(VelocityNedYaw(0.0, 0.0, 0.0, angle))
+    await asyncio.sleep(2)
+    input("Press Enter to continue...")
+
+    # Calculate drone's distance from the point (Assumes starting at origin)
+    distance = math.sqrt(initial_location[1] ** 2 + initial_location[2] ** 2)
+    
+    # Mark the halfway point from the destination
+    half_distance = distance / 2
+
+    # Change speed depending on the drone's distance from the point
+    speed = speed_function(distance)
+    await drone.offboard.set_velocity_body(VelocityBodyYawspeed(speed, 0.0, 0.0, 0.0))
+
+    for i in range(int(video_duration_seconds*30)):
+       initial_location = await update_location(int(i*fps))
+       drone_latitude = initial_location[1]
+       drone_longitude = initial_location[2]
+       angle = 90+math.degrees(math.atan2(drone_latitude, drone_longitude))
+       print(f"-- Turn to face {angle}")
+       await drone.offboard.set_velocity_ned(VelocityNedYaw(0.0, 0.0, 0.0, angle))
+       await asyncio.sleep(1)
+       distance = math.sqrt(initial_location[1] ** 2 + initial_location[2] ** 2)
+       half_distance = distance / 2
+       speed = speed_function(distance)
+       await drone.offboard.set_velocity_body(VelocityBodyYawspeed(speed, 0.0, 0.0, 0.0))
+       await asyncio.sleep(1)
          
 
     print("-- Stopping offboard")
@@ -98,6 +133,63 @@ async def run():
         print(f"Stopping offboard mode failed \
                 with error code: {error._result.result}")
         
+
+async def update_location(time_passed):
+    vidcap = cv2.VideoCapture('../images/shark.mp4')
+    height = vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    width = vidcap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    vidcap.set(cv2.CAP_PROP_POS_MSEC, time_passed)
+    height = vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    width = vidcap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    success, frame = vidcap.read()
+    if not success:
+        print("Video ended")
+        return None, None, None  # Return None if video ended
+
+    # Perform object detection on the frame
+    results = model(frame)
+    results_np = results.xyxy[0].numpy()
+    box_x = 0
+    box_y = 0
+
+    # Draw bounding boxes on the frame
+    for result in results_np:
+        threshold = .35
+        detection_type = ""
+        x1, y1, x2, y2, conf, cls = result
+        if cls == 3:
+            detection_type = "Shark"
+            threshold = .70
+            box_x = (x1+x2)/2
+            box_y = (y1+y2)/2
+            print(f"Shark Box Location ({box_x, box_y})")
+        elif cls == 2:
+            detection_type = "Person"
+        
+        if conf > threshold:
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    center_x = width / 2
+    center_y = height / 2
+
+    # Find the distance of the box from the center
+    offset_x = box_x - center_x
+    offset_y = -(box_y - center_y)
+    print(f"Horizontal distance from image center: {offset_x}")
+    print(f"Vertical distance from image center: {offset_y}")   
+    meters_per_pixel = 0.1
+    location_x = offset_x * meters_per_pixel
+    location_y = offset_y * meters_per_pixel
+    print(f"Location ({location_x, location_y})")
+    cv2.imshow('Frame', frame)
+    cv2.waitKey(1)
+    vidcap.release()
+
+
+    return [frame, location_x, location_y]
+
+
 def populate_life_guard_stands(initial_lat, initial_lng, num_stands):
     # Initialize an empty list to store lifeguard stands
     lifeguard_stands = []
@@ -140,54 +232,15 @@ async def print_lat_lng(drone):
     print("Latitude:", latitude)
     print("Longitude:", longitude)
 
-def update_location(time_passed):
-    video_location = '../images/shark.mp4'
-    vidcap = cv2.VideoCapture(video_location)
-    vidcap.set(cv2.CAP_PROP_POS_MSEC, time_passed)
-    success, frame = vidcap.read()
-    if not success:
-        print("Video ended")
-        return
 
-    # Load YOLOv5 model
-    model = torch.hub.load('ultralytics/yolov5', 'custom', path='../best.pt')
-
-    while success:
-        # Perform object detection on the frame
-        results = model(frame)
-        results_np = results.xyxy[0].numpy()
-
-        # Draw bounding boxes on the frame
-        for result in results_np:
-            threshold = .35
-            detection_type = ""
-            x1, y1, x2, y2, conf, cls = result
-            if cls == 3:
-                detection_type = "Shark"
-                threshold = .70
-            elif cls == 2:
-                detection_type = "Person"
-            
-            if conf > threshold:
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                cv2.putText(frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-        # Display the frame
-        cv2.imshow('Frame', frame)
-        if cv2.waitKey(25) & 0xFF == ord('q'):
-            break
-
-        # Read the next frame
-        success, frame = vidcap.read()
-
-    # Release video capture and close OpenCV windows
-    vidcap.release()
-    cv2.destroyAllWindows()
+def speed_function(distance):
+    # Current function: ln(2x+1) with no values exceeding 4
+    speed = math.log(2 * distance + 1)
+    if speed > 4:
+        speed = 4
+    return speed
 
 
 if __name__ == "__main__":
-    root = Tk()
-    canvas = Canvas(root, width=800, height=500)
     # Run the asyncio loop
     asyncio.run(run())
-
