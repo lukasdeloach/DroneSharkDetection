@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 # Author - Lukas DeLoach
-import math
-import json
-import sys
 import asyncio
+import json
+import math
+import sys
 import time
-from mavsdk import System
-from mavsdk.offboard import (OffboardError, PositionNedYaw, VelocityBodyYawspeed, VelocityNedYaw, PositionGlobalYaw)
-from geopy.distance import great_circle 
-from life_guard_stand import LifeGuardStand
-import torch
-import cv2
-from PIL import Image
-import tkinter
+import tkinter as tk
 from tkinter import *
+
+import cv2
+import torch
+from geopy.distance import great_circle
+from life_guard_stand import LifeGuardStand
+from mavsdk import System
+from mavsdk.offboard import (
+    OffboardError,
+    PositionGlobalYaw,
+    PositionNedYaw,
+    VelocityBodyYawspeed,
+    VelocityNedYaw,
+)
 from PIL import Image, ImageTk
 
 # Initial coordinates
@@ -24,7 +30,7 @@ print(sys.maxsize)
 num_stands = 10
 
 # Determine the total number of frames in the video
-video_file = '../images/testVido.mp4'
+video_file = '../images/shark.mp4'
 vidcap = cv2.VideoCapture(video_file)
 fps = 50
 total_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -36,6 +42,8 @@ video_duration_seconds = total_frames / fps  # Assuming 'fps' is the frame rate 
 time_interval = 1 / 30  # seconds
 WIDTH = 800
 HEIGHT = 500
+LAT = 29.043192
+LNG = -80.897632
 
 model = torch.hub.load('ultralytics/yolov5', 'custom', path='../best.pt')
 
@@ -61,11 +69,8 @@ async def run():
     print("-- Arming")
     await drone.action.arm()
     
-    lat = 29.043192
-    lng = -80.897632
-    
     print("-- Setting initial setpoint")
-    await drone.offboard.set_position_global(PositionGlobalYaw(lat, lng, 0.0, 0.0, PositionGlobalYaw.AltitudeType(0)))
+    await drone.offboard.set_position_global(PositionGlobalYaw(LAT, LNG, 0.0, 0.0, PositionGlobalYaw.AltitudeType(0)))
     await get_drone_position(drone)
 
     print("-- Starting offboard")
@@ -106,7 +111,7 @@ async def run():
     await get_drone_position(drone)
 
     elapsed_time = 0
-    initial_location = await update_location(elapsed_time, drone)
+    initial_location = await update_location(elapsed_time)
     location_x= initial_location[1]
     location_y = initial_location[2]
     angle = 90 - math.degrees(math.atan2(location_y, location_x))
@@ -132,7 +137,7 @@ async def run():
 
     async for pos in drone.telemetry.position_velocity_ned():
         i += 1
-        location = await update_location(i * fps, drone)
+        location = await update_location(i * fps)
         if location[0] is None and location[1] is None and location[2] is None and location[3] is None:
             break
         else:
@@ -146,6 +151,8 @@ async def run():
             speed = 0
             
             if found_shark:
+                drone_location = await get_drone_position(drone)
+                notify_nearest_stand(drone_location)
                 if distance < half_distance:  # If less than halfway to the shark, slow down
                     print("Drone is very close to the shark -- slowing down.")
                     await drone.offboard.set_velocity_body(VelocityBodyYawspeed(speed, 0.0, 0.0, angle))
@@ -182,29 +189,6 @@ async def run():
                 print("There was no shark found. Holding position")
                 await drone.offboard.set_velocity_ned(VelocityNedYaw(0,0,0,-40))
 
-
-
-    
-
-    # print("-- Stopping offboard")
-    # try:
-    #     await drone.offboard.stop()
-    # except OffboardError as error:
-    #     print(f"Stopping offboard mode failed \
-    #             with error code: {error._result.result}")
-
-
-
-    # for i in range(int(video_duration_seconds*fps)):
-    #    initial_location = await update_location(int(i*fps), drone)
-    #    drone_location = await get_drone_position(drone)
-    #    notify_nearest_stand(drone_location)
-    #   # await drone.offboard.set_velocity_ned(VelocityNedYaw(0.0, 0.0, 0.0, initial_location[3]))
-    #    #await asyncio.sleep(10)
-    #    #input("Press to keep going")
-    #    if initial_location[0] is None and initial_location[1] is None and initial_location[2] is None:
-    #        break
-
     
     print("-- Returning Back to shore and landing")
     await drone.offboard.set_position_ned(
@@ -224,7 +208,7 @@ async def run():
                 with error code: {error._result.result}")
         
 
-async def update_location(time_passed, drone):
+async def update_location(time_passed):
     vidcap = cv2.VideoCapture(video_file)
     vidcap.set(cv2.CAP_PROP_POS_MSEC, time_passed)
     success, frame = vidcap.read()
@@ -281,41 +265,6 @@ async def update_location(time_passed, drone):
     location_x = offset_x * meters_per_pixel
     location_y = offset_y * meters_per_pixel
 
-    # if(found_shark):
-    #     angle = 90-math.degrees(math.atan2(location_y, location_x))
-    #     prev_pos = await drone.telemetry.position_velocity_ned().__anext__()
-    #     print(prev_pos.position.north_m)
-    #     #distance = math.sqrt((0 + location_x- prev_pos.position.east_m) ** 2 + (0 + location_y - prev_pos.position.north_m) ** 2)
-    #     distance = math.sqrt(location_x ** 2 + location_y ** 2)
-    #     print(distance, "distance")
-        
-    #     #Mark the halfway point from the destination
-    #     half_distance = distance / 2
-
-    #     # Change speed depending on the drone's distance from the point
-    #     speed = speed_function(half_distance)
-    #     print(f"{point[1]} compared to height {height}" )
-    #     if(point[1]<height):
-    #         print(f"--- Moving up by 5m and facing towards {angle}")
-    #         await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0.0,angle))
-
-    #     elif(point[1]>height):
-    #         print(f"--- Moving down by 5m and facing towards {angle}")
-    #         speed = -speed
-    #         await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0.0,angle))
-
-    #     print(f"{point[0]} compared to width {width}" )
-    #     if(point[0]<width/2):
-    #         print(f"--- Moving with a speed of {speed} towards the angle1 {angle}")
-    #         await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0,angle))
-
-    #     elif(point[0]>width/2):
-    #         print(f"Moving with a speed of {speed} towards the angle2 {angle}")
-    #         await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0,angle))
-    # else:
-    #     print(f"No shark detected holding position")
-    #     await drone.offboard.set_velocity_ned(VelocityNedYaw(0,0,0,-40))
-
     print(f"Location ({location_x, location_y})")
     cv2.imshow('Shark Detection', resized_frame)
     cv2.waitKey(1)
@@ -335,28 +284,25 @@ def notify_nearest_stand(drone_location):
             smallest_distance = distance
             smallest_stand = stand
     print(f"Notifying this stand {smallest_stand.name}, which is {smallest_distance} away from the detected shark")
+
+    with open('../frontend/notification.txt', 'w') as file:
+        file.write(f"{smallest_stand.name}, {smallest_stand.latitude}, {smallest_stand.longitude}, {distance}")
+
     return (smallest_stand, smallest_distance)
+
         
 
 def populate_life_guard_stands():
     # Initialize an empty list to store lifeguard stands
     lifeguard_stands = []
 
-    with open("./lifeguard_stand_data.json") as f:
+    with open("../frontend/lifeguard_stand_data.json") as f:
         lifeguard_stand_data = json.load(f)
     
     for stand in lifeguard_stand_data:
         lifeguard_stands.append(LifeGuardStand(name=stand["name"], latitude=stand["lat"], longitude=stand["lng"]))
 
     return lifeguard_stands
-
-        
-# Populate lifeguard stands
-lifeguard_stands = populate_life_guard_stands()
-
-# Print the details of each lifeguard stand
-for stand in lifeguard_stands:
-    print(f"{stand.name}: Latitude {stand.latitude}, Longitude {stand.longitude}")
 
 async def get_drone_position(drone):
     position = await drone.telemetry.position().__anext__()
@@ -376,5 +322,10 @@ def speed_function(distance):
 
 
 if __name__ == "__main__":
-    # Run the asyncio loop
+    # Populate lifeguard stands
+    lifeguard_stands = populate_life_guard_stands()
+
+    # Print the details of each lifeguard stand
+    for stand in lifeguard_stands:
+        print(f"{stand.name}: Latitude {stand.latitude}, Longitude {stand.longitude}")
     asyncio.run(run())
