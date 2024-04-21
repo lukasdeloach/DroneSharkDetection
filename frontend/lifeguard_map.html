@@ -15,24 +15,25 @@
         #container {
             display: flex;
             height: 100vh;
-            position: relative; /* Added for absolute positioning */
+            position: relative;
         }
         #image-container {
             flex: 1;
-            position: relative; /* Added for absolute positioning */
+            position: relative;
         }
         #image-container img {
             max-width: 100%;
             max-height: 100%;
-            display: block; /* Fix for default image display behavior */
+            display: block;
         }
         .stand-marker {
             position: absolute;
-            font-size: 20px; /* Adjust icon size as needed */
-            color: green; /* Default color for markers */
+            font-size: 20px;
+            color: green;
+            transition: color 0.3s ease; /* Added smooth color transition */
         }
         .stand-marker.alert {
-            color: red; /* Color for alert markers */
+            color: red;
         }
         #notifications-container {
             flex: 1;
@@ -40,12 +41,30 @@
             padding: 20px;
             background-color: #fff;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 10px; /* Added border radius for a modern look */
         }
         #title {
             text-align: center;
             font-size: 24px;
             margin-bottom: 20px;
             color: #333;
+        }
+        #notifications {
+            margin-top: 20px;
+        }
+        .notification {
+            background-color: #f8f8f8;
+            border-left: 5px solid #3498db;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease; /* Added smooth background transition */
+        }
+        .notification.alert {
+            background-color: #e74c3c;
+            color: #fff;
+            border-left-color: #c0392b;
         }
         #footer {
             position: fixed;
@@ -60,7 +79,6 @@
     <div id="container">
         <div id="image-container">
             <img src="NSB.png" alt="NSB Image">
-            <!-- Lifeguard stand markers will be dynamically added here -->
             <div class="stand-marker" id="stand-8" style="top: 25px; left: 185px;"><i class="fas fa-umbrella-beach"></i></div>
             <div class="stand-marker" id="stand-7" style="top: 100px; left: 220px;"><i class="fas fa-umbrella-beach"></i></div>
             <div class="stand-marker" id="stand-6" style="top: 175px; left: 250px;"><i class="fas fa-umbrella-beach"></i></div>
@@ -73,37 +91,29 @@
         </div>
         <div id="notifications-container">
             <div id="title">Lifeguard Stand Notifications</div>
-            <div id="notifications">
-                <!-- Notifications will be dynamically added here -->
-            </div>
+            <div id="notifications"></div>
         </div>
     </div>
     <div id="footer">Created by Lukas DeLoach</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script>
         $(document).ready(function() {
-            // Function to fetch notifications from the server
             var currentStand = 0;
             function fetchNotifications() {
                 $.ajax({
                     url: 'notification.txt',
                     type: 'GET',
                     success: function(data) {
-                        // Split data into lines
                         var lines = data.split('\n');
                         var notifications = {};
-                        // Iterate over each line
                         lines.forEach(function(line) {
-                            // Split line into parts
                             var parts = line.split(', ');
                             var name = parts[0];
                             var lat = parts[1];
                             var lng = parts[2];
                             var distance = parts[3];
-                            // Create notification object
                             notifications[name] = {lat: lat, lng: lng, distance: distance};
                         });
-                        // Update notifications if there are changes
                         updateNotifications(notifications);
                     },
                     error: function(xhr, status, error) {
@@ -112,23 +122,19 @@
                 });
             }
 
-            // Function to update notifications
             function updateNotifications(newNotifications) {
-                // Get existing notifications
                 var existingNotifications = $('#notifications').children();
-                // Compare with new notifications
                 for (var name in newNotifications) {
                     var isNew = true;
                     existingNotifications.each(function() {
                         if ($(this).text().includes(name)) {
                             isNew = false;
-                            return false; // Exit loop if found
+                            return false;
                         }
                     });
                     if (isNew) {
-                        var notificationText = 'Shark detected at ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' + newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) + ' m, time: ' + new Date();
-                        $('#notifications').append('<div>' + notificationText + '</div>');
-                        // Alert the corresponding stand marker
+                        var notificationText = 'Shark detected near ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' + newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) + ' m, time: ' + new Date();
+                        $('#notifications').append('<div class="notification">' + notificationText + '</div>');
                         $('#stand-' + currentStand).removeClass('alert');
                         $('#stand-' + name.split(' ')[1]).addClass('alert');
                         currentStand = name.split(' ')[1]
@@ -136,7 +142,6 @@
                 }
             }
 
-            // Fetch notifications every 1 second
             setInterval(fetchNotifications, 500);
         });
     </script>
