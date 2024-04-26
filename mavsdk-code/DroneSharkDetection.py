@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+import os
 import sys
 import tkinter as tk
 from tkinter import *
@@ -182,8 +183,11 @@ async def run():
                       print("Drone is in a good position -- shark is in center frame -- Holding position.")
 
                 await drone.offboard.set_velocity_ned(VelocityNedYaw(speed_y,speed_x,0.0,angle))
-                await asyncio.sleep(7)
+                await asyncio.sleep(2)
                 last_found_location = [location_x, location_y, angle]
+                distance = math.sqrt((origin_x + location_x - pos.position.east_m) ** 2 + (
+                    origin_y + location_y - pos.position.north_m) ** 2)
+                half_distance = distance / 2
                 print(f"Distance: {distance}, Half Way Distance: {half_distance}, Speed: {speed}")
             else:
                 print("There was no shark found. Holding position")
