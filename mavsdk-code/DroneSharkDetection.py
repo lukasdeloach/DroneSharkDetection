@@ -4,7 +4,6 @@ import asyncio
 import json
 import math
 import sys
-import time
 import tkinter as tk
 from tkinter import *
 
@@ -25,7 +24,6 @@ from PIL import Image, ImageTk
 # Initial coordinates
 initial_lat = 29.043192
 initial_lng = -80.897632
-print(sys.maxsize)
 # Number of lifeguard stands to populate
 num_stands = 10
 
@@ -44,13 +42,13 @@ WIDTH = 800
 HEIGHT = 500
 LAT = 29.043192
 LNG = -80.897632
+THRESHOLD = .125
+SHARKS = {} # Dictionary to keep track of how many sharks were detected in the entirety of the simulation. 
 
 model = torch.hub.load('ultralytics/yolov5', 'custom', path='../best.pt')
 
 async def run():
-    """ Does Offboard control using position NED coordinates. """
     
-
     drone = System(mavsdk_server_address='localhost', port=50051)
     await drone.connect(system_address="udp://:14540")
 
@@ -102,7 +100,7 @@ async def run():
     await asyncio.sleep(5)
 
 
-    # Go east out to ocean first
+    # Turning north to scan for sharks
     print("-- Go 100m North, 0m East, -10m Down \
             within local coordinate system, Turn to face the North and Scan for Sharks")
     await drone.offboard.set_position_ned(
@@ -112,20 +110,19 @@ async def run():
 
     elapsed_time = 0
     initial_location = await update_location(elapsed_time)
-    location_x= initial_location[1]
+    location_x = initial_location[1]
     location_y = initial_location[2]
     angle = 90 - math.degrees(math.atan2(location_y, location_x))
+    # Calculate drone's distance from the point (Assumes starting at origin)
+    distance = math.sqrt(location_x ** 2 + location_y ** 2)
+    # Mark the halfway point from the destination
+    half_distance = distance / 2
 
+    print(f"Detected a Shark! Drone Distance from shark: {distance}. ")
     print(f"-- Turn to face {angle}")
     await drone.offboard.set_velocity_ned(VelocityNedYaw(0.0, 0.0, 0.0, angle))
     await asyncio.sleep(2)
     input("Press Enter to continue...")
-
-    # Calculate drone's distance from the point (Assumes starting at origin)
-    distance = math.sqrt(location_x ** 2 + location_y ** 2)
-    
-    # Mark the halfway point from the destination
-    half_distance = distance / 2
 
     # Change speed depending on the drone's distance from the point
     speed = speed_function(distance)
@@ -134,10 +131,12 @@ async def run():
     origin_x = 0
     origin_y = 0
     i = 0
+    last_found_location = [0,0,0]
 
     async for pos in drone.telemetry.position_velocity_ned():
+        print("\n")
         i += 1
-        location = await update_location(i * fps)
+        location = await update_location(i *400)
         if location[0] is None and location[1] is None and location[2] is None and location[3] is None:
             break
         else:
@@ -147,47 +146,48 @@ async def run():
             point = location[4]
             distance = math.sqrt((origin_x + location_x - pos.position.east_m) ** 2 + (
                     origin_y + location_y - pos.position.north_m) ** 2)
-            print(distance, "distance")
-            speed = 0
             
             if found_shark:
                 drone_location = await get_drone_position(drone)
                 notify_nearest_stand(drone_location)
                 if distance < half_distance:  # If less than halfway to the shark, slow down
                     print("Drone is very close to the shark -- slowing down.")
-                    await drone.offboard.set_velocity_body(VelocityBodyYawspeed(speed, 0.0, 0.0, angle))
+                    await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0.0, 0.0, 0.0, angle))
                 else:  # If more than halfway, fly towards the shark
                   angle = 90-math.degrees(math.atan2(location_y, location_x))
                   half_distance = distance / 2
                   origin_x = pos.position.east_m
                   origin_y = pos.position.north_m
                   # Change speed depending on the drone's distance from the point
-                  speed = speed_function(half_distance)
-                  print(f"{location_y} compared to height {500}" )
-                  if(point[1]<HEIGHT):
-                    print(f"--- Moving up by 5m and facing towards {angle}")
-                    await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0.0,angle))
-                  elif(point[1]>HEIGHT):
-                    print(f"--- Moving down by 5m and facing towards {angle}")
-                    speed = -speed
-                    await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0.0,angle))
-                    
-                  print(f"{location_x} compared to width {800}" )
-                  if(point[0]<WIDTH):
-                    print(f"--- Moving with a speed of {speed} towards the angle1 {angle}")
-                    await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0,angle))
+                  speed_y = 0
+                  speed_x = 0
 
-                  elif(point[0]>WIDTH):
-                    print(f"Moving with a speed of {speed} towards the angle2 {angle}")
-                    await drone.offboard.set_velocity_ned(VelocityNedYaw(speed,0,0,angle))
+                  # Calculate the vertical and horizontal distance from the last found location
+                  delta_y = location_y - last_found_location[1]
+                  delta_x = location_x - last_found_location[0]
 
-                distance = math.sqrt((origin_x + location_x - pos.position.east_m) ** 2 + (
-						origin_y + location_y - pos.position.north_m) ** 2)
-                half_distance = distance / 2
+                  # Adjust drone's speed and direction based on shark's movement
+                  if abs(delta_y) > THRESHOLD:  # If shark has moved significantly in vertical direction
+                      # Adjust drone's vertical speed proportional to shark's movement
+                      speed_y = speed_function(abs(delta_y+half_distance)) * (1 if delta_y > 0 else -1)
+                      print(f"Shark has moved {'up' if delta_y > 0 else 'down'} by {abs(delta_y)}m. Drone facing towards {angle}")
+
+                  if abs(delta_x) > THRESHOLD:  # If shark has moved significantly in horizontal direction
+                      # Adjust drone's horizontal speed proportional to shark's movement
+                      speed_x = speed_function(abs(delta_x+half_distance)) * (1 if delta_x > 0 else -1)
+                      print(f"Shark has moved {'right' if delta_x > 0 else 'left'} by {abs(delta_x)}m. Drone facing towards {angle}")
+
+                  # If both delta_x and delta_y are within threshold, hold position
+                  if abs(delta_y) <= THRESHOLD and abs(delta_x) <= THRESHOLD:
+                      print("Drone is in a good position -- shark is in center frame -- Holding position.")
+
+                await drone.offboard.set_velocity_ned(VelocityNedYaw(speed_y,speed_x,0.0,angle))
+                await asyncio.sleep(7)
+                last_found_location = [location_x, location_y, angle]
                 print(f"Distance: {distance}, Half Way Distance: {half_distance}, Speed: {speed}")
             else:
                 print("There was no shark found. Holding position")
-                await drone.offboard.set_velocity_ned(VelocityNedYaw(0,0,0,-40))
+                await drone.offboard.set_velocity_ned(VelocityNedYaw(0,0,0,last_found_location[2]))
 
     
     print("-- Returning Back to shore and landing")
@@ -209,6 +209,8 @@ async def run():
         
 
 async def update_location(time_passed):
+    global SHARKS  # Access the global SHARKS dictionary
+    
     vidcap = cv2.VideoCapture(video_file)
     vidcap.set(cv2.CAP_PROP_POS_MSEC, time_passed)
     success, frame = vidcap.read()
@@ -227,45 +229,61 @@ async def update_location(time_passed):
 
     # Draw bounding boxes on the resized frame
     for result in results_np:
-        threshold = .35
-        shark_threshold = .65
+        threshold = 0.35
+        shark_threshold = 0.60
         detection_type = ""
         x1, y1, x2, y2, conf, cls = result
+        
         if cls == 3 and conf >= shark_threshold:
-            found_shark = True
             detection_type = "Shark"
-            box_x = (x1+x2)/2
-            box_y = (y1+y2)/2
-            print(f"Shark Box Location ({box_x, box_y})")
-            point = [int(x1+(x2/2)), int((y1+(y2/2)))] ## Center of the Bounding box where the shark is could use this or other??
-            cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            shark_id = None
+            box_x = (x1 + x2) / 2
+            box_y = (y1 + y2) / 2
+            
+            # Check if any existing SHARKS are close to the current detection
+            for id_, (prev_x, prev_y) in SHARKS.items():
+                distance = ((prev_x - box_x) ** 2 + (prev_y - box_y) ** 2) ** 0.5
+                if distance < 200:  # Assuming a threshold of 200 pixels for proximity add a global variable to set this?
+                    shark_id = id_
+                    break
+            
+            # If no existing shark is close, assign a new ID
+            if shark_id is None:
+                shark_id = len(SHARKS) + 1
 
-        elif cls == 2 and conf > .50:
+            SHARKS[shark_id] = (box_x, box_y)
+            print(f"Shark {shark_id} Box Location ({box_x}, {box_y})")
+        
+            cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(resized_frame, f'{detection_type} {shark_id}: {conf:.2f}', (int(x1), int(y1) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            found_shark = True  # Set found_shark to True whenever a shark is detected
+
+        elif cls == 2 and conf > 0.50:
             detection_type = "Person"
             cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-        elif cls == 3 and conf > .70:
+        elif cls == 3 and conf > 0.85:
             detection_type = "Boat"
             cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        
+            cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     center_x = WIDTH / 2
     center_y = HEIGHT / 2
 
-    # Find the distance of the box from the center
-    offset_x = box_x - center_x
-    offset_y = -(box_y - center_y)
-    print(f"offset is")
-    print(f"Horizontal distance from image center: {offset_x}")
-    print(f"Vertical distance from image center: {offset_y}")   
+    # Find the distance of the box from the center. Using the first detected shark for drone consistency
+    first_shark_location = SHARKS[1]
+    box_x, box_y = first_shark_location
+    offset_x = box_x - center_x if found_shark else 0  # If no shark found, set offset to 0
+    offset_y = -(box_y - center_y) if found_shark else 0
     meters_per_pixel = 0.1
     location_x = offset_x * meters_per_pixel
     location_y = offset_y * meters_per_pixel
 
-    print(f"Location ({location_x, location_y})")
+    print(f"Location ({location_x}, {location_y})")
     cv2.imshow('Shark Detection', resized_frame)
     cv2.waitKey(1)
     vidcap.release()
@@ -274,7 +292,6 @@ async def update_location(time_passed):
 
 
 def notify_nearest_stand(drone_location):
-    print(sys.maxsize)
     smallest_distance = sys.maxsize
     smallest_stand = None
     for stand in lifeguard_stands:
@@ -289,7 +306,6 @@ def notify_nearest_stand(drone_location):
         file.write(f"{smallest_stand.name}, {smallest_stand.latitude}, {smallest_stand.longitude}, {distance}")
 
     return (smallest_stand, smallest_distance)
-
         
 
 def populate_life_guard_stands():
@@ -308,16 +324,15 @@ async def get_drone_position(drone):
     position = await drone.telemetry.position().__anext__()
     latitude = position.latitude_deg
     longitude = position.longitude_deg
-    print("Latitude:", latitude)
-    print("Longitude:", longitude)
+    print(f"Drone Position Update: --- Latitude: {latitude} --- Longitude: {longitude}")
     return (latitude, longitude)
 
 
 def speed_function(distance):
     # Current function: ln(2x+1) with no values exceeding 4
     speed = math.log(2 * distance + 1)
-    if speed > 3:
-        speed = 3
+    if speed > 2:
+        speed = 2
     return speed
 
 

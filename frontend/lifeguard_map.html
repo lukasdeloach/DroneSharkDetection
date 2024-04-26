@@ -133,7 +133,9 @@
                         }
                     });
                     if (isNew) {
-                        var notificationText = 'Shark detected near ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' + newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) + ' m, time: ' + new Date();
+                        var notificationText = 'Shark detected near ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' +
+                             newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) 
+                            + ' m, time: ' + new Date();
                         $('#notifications').append('<div class="notification">' + notificationText + '</div>');
                         $('#stand-' + currentStand).removeClass('alert');
                         $('#stand-' + name.split(' ')[1]).addClass('alert');
