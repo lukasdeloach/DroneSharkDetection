@@ -1,5 +1,6 @@
 $(document).ready(function() {
     var currentStand = 0;
+    var currentWarningLevel = "";
 
     function fetchNotifications() {
         $.ajax({
@@ -14,7 +15,8 @@ $(document).ready(function() {
                     var lat = parts[1];
                     var lng = parts[2];
                     var distance = parts[3];
-                    notifications[name] = {lat: lat, lng: lng, distance: distance};
+                    var warning = parts[4]
+                    notifications[name] = {lat: lat, lng: lng, distance: distance, warning: warning};
                 });
                 updateNotifications(notifications);
             },
@@ -28,23 +30,43 @@ $(document).ready(function() {
         var existingNotifications = $('#notifications').children();
         for (var name in newNotifications) {
             var isNew = true;
+            var newAlert = true;
             existingNotifications.each(function() {
                 if ($(this).text().includes(name)) {
-                    isNew = false;
-                    return false;
+                    console.log($(this).text())
+                    if(newNotifications[name].warning === currentWarningLevel){
+                        newAlert = false
+                    }
+                    isNew = false;    
                 }
             });
-            if (isNew) {
-                var notificationText = 'Shark detected near ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' +
-                     newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) 
-                    + ' m, time: ' + new Date();
-                $('#notifications').append('<div class="notification">' + notificationText + '</div>');
+            if (isNew || newAlert) {
+                var warningLevel = newNotifications[name].warning;
+                var notificationText = warningLevel + 'Shark detected near ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' +
+                    newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) +
+                    ' m, time: ' + new Date();
+                var $notification = $('<div class="notification">' + notificationText + '</div>');
+                
+                // Check if the warning level is "DANGER" and set the background color accordingly
+                if (warningLevel === "DANGER: ") {
+                    $notification.css('background-color', 'red');
+                }
+
+                else if (warningLevel === "WARNING: ") {
+                    $notification.css('background-color', 'yellow');
+                }
+    
+                $('#notifications').append($notification);
                 $('#stand-' + currentStand).removeClass('alert');
                 $('#stand-' + name.split(' ')[1]).addClass('alert');
                 currentStand = name.split(' ')[1]
+                currentWarningLevel = warningLevel
             }
         }
     }
+    
+    setInterval(fetchNotifications, 500);
+    
 
     setInterval(fetchNotifications, 500);
 });

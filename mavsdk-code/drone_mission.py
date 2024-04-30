@@ -11,7 +11,8 @@ from tkinter import *
 import cv2
 import torch
 from geopy.distance import great_circle
-from life_guard_stand import LifeGuardStand
+from LifeguardStand import LifeGuardStand
+from SharkAlerts import SharkAlert
 from mavsdk import System
 from mavsdk.offboard import (
     OffboardError,
@@ -144,13 +145,13 @@ async def run():
             location_x = location[1]
             location_y = location[2]
             found_shark = location[3]
-            point = location[4]
+            alert = location[4]
             distance = math.sqrt((origin_x + location_x - pos.position.east_m) ** 2 + (
                     origin_y + location_y - pos.position.north_m) ** 2)
             
             if found_shark:
                 drone_location = await get_drone_position(drone)
-                notify_nearest_stand(drone_location)
+                notify_nearest_stand(drone_location, alert)
                 if distance < half_distance:  # If less than halfway to the shark, slow down
                     print("Drone is very close to the shark -- slowing down.")
                     await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0.0, 0.0, 0.0, angle))
@@ -214,6 +215,7 @@ async def run():
 
 async def update_location(time_passed):
     global SHARKS  # Access the global SHARKS dictionary
+    persons = []
     
     vidcap = cv2.VideoCapture(video_file)
     vidcap.set(cv2.CAP_PROP_POS_MSEC, time_passed)
@@ -226,10 +228,9 @@ async def update_location(time_passed):
     resized_frame = cv2.resize(frame, (WIDTH, HEIGHT))
     results = model(resized_frame)
     results_np = results.xyxy[0].numpy()
-    box_x = 0
-    box_y = 0
+    shark_box_x = shark_box_y = 0
     found_shark = False
-    point = []
+    found_person = False
 
     # Draw bounding boxes on the resized frame
     for result in results_np:
@@ -241,12 +242,12 @@ async def update_location(time_passed):
         if cls == 3 and conf >= shark_threshold:
             detection_type = "Shark"
             shark_id = None
-            box_x = (x1 + x2) / 2
-            box_y = (y1 + y2) / 2
+            shark_box_x = (x1 + x2) / 2
+            shark_box_y = (y1 + y2) / 2
             
             # Check if any existing SHARKS are close to the current detection
             for id_, (prev_x, prev_y) in SHARKS.items():
-                distance = ((prev_x - box_x) ** 2 + (prev_y - box_y) ** 2) ** 0.5
+                distance = calculate_distance_between_objects(shark_box_x, shark_box_y, prev_x, prev_y)
                 if distance < 200:  # Assuming a threshold of 200 pixels for proximity add a global variable to set this?
                     shark_id = id_
                     break
@@ -255,8 +256,8 @@ async def update_location(time_passed):
             if shark_id is None:
                 shark_id = len(SHARKS) + 1
 
-            SHARKS[shark_id] = (box_x, box_y)
-            print(f"Shark {shark_id} Box Location ({box_x}, {box_y})")
+            SHARKS[shark_id] = (shark_box_x, shark_box_y)
+            print(f"Shark {shark_id} Box Location ({shark_box_x}, {shark_box_y})")
         
             cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
             cv2.putText(resized_frame, f'{detection_type} {shark_id}: {conf:.2f}', (int(x1), int(y1) - 5),
@@ -268,34 +269,77 @@ async def update_location(time_passed):
             cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
             cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            person_box_x = (x1 + x2) / 2
+            person_box_y = (y1 + y2) / 2
+            persons.append((person_box_x, person_box_y))
+            found_person = True
 
         elif cls == 3 and conf > 0.85:
             detection_type = "Boat"
             cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
             cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        elif cls == 4 and conf > 0.85:
+            detection_type = "Other Animal"
+            cv2.rectangle(resized_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
 
-    center_x = WIDTH / 2
-    center_y = HEIGHT / 2
-
-    # Find the distance of the box from the center. Using the first detected shark for drone consistency
     first_shark_location = SHARKS[1]
-    box_x, box_y = first_shark_location
-    offset_x = box_x - center_x if found_shark else 0  # If no shark found, set offset to 0
-    offset_y = -(box_y - center_y) if found_shark else 0
-    meters_per_pixel = 0.1
-    location_x = offset_x * meters_per_pixel
-    location_y = offset_y * meters_per_pixel
-
-    print(f"Location ({location_x}, {location_y})")
+    shark_location_x = shark_location_y = 0
+    alert = None
+    if found_shark:
+        shark_location_x, shark_location_y = normalize_location(first_shark_location)
+        alert = SharkAlert.INFO
+        if found_person:
+            alert = update_alert_based_on_distance((shark_box_x, shark_box_y), persons)
+    
     cv2.imshow('Shark Detection', resized_frame)
     cv2.waitKey(1)
     vidcap.release()
 
-    return [resized_frame, location_x, location_y, found_shark, point]
+    return [resized_frame, shark_location_x, shark_location_y, found_shark, alert]
 
 
-def notify_nearest_stand(drone_location):
+def normalize_location(object_location):
+    center_x = WIDTH / 2
+    center_y = HEIGHT / 2
+    box_x, box_y = object_location
+    offset_x = box_x - center_x  
+    offset_y = -(box_y - center_y)
+    meters_per_pixel = 0.1
+    location_x = offset_x * meters_per_pixel
+    location_y = offset_y * meters_per_pixel
+    print(f"Location ({location_x}, {location_y})")
+    return (location_x, location_y)
+
+DANGER_THRESHOLD = 200.0  # Distance threshold for danger (in meters)
+WARNING_THRESHOLD = 400.0  # Distance threshold for warning (in meters)
+def update_alert_based_on_distance(shark_location, persons):
+    shark_location_x, shark_location_y = shark_location
+    smallest_distance = sys.maxsize
+    alert = None
+    for person in persons:
+        person_location_x, person_location_y = normalize_location(person)
+        distance = calculate_distance_between_objects(shark_location_x, shark_location_y, person_location_x, person_location_y)
+        if distance < smallest_distance:
+            smallest_distance = distance
+    if smallest_distance < DANGER_THRESHOLD:
+        alert = SharkAlert.DANGER
+    elif smallest_distance < WARNING_THRESHOLD:
+        alert = SharkAlert.WARNING
+    print("smallestdist",smallest_distance)
+    return alert
+
+
+def calculate_distance_between_objects(x1, y1, x2, y2):
+    # Calculate Euclidean distance between two points
+    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+
+
+def notify_nearest_stand(drone_location, alert):
     smallest_distance = sys.maxsize
     smallest_stand = None
     for stand in lifeguard_stands:
@@ -307,7 +351,7 @@ def notify_nearest_stand(drone_location):
     print(f"Notifying this stand {smallest_stand.name}, which is {smallest_distance} away from the detected shark")
 
     with open('../frontend/notification.txt', 'w') as file:
-        file.write(f"{smallest_stand.name}, {smallest_stand.latitude}, {smallest_stand.longitude}, {distance}")
+        file.write(f"{smallest_stand.name}, {smallest_stand.latitude}, {smallest_stand.longitude}, {distance}, {alert.value + ': ' if alert is not None else ''}")
 
     return (smallest_stand, smallest_distance)
         
@@ -335,8 +379,8 @@ async def get_drone_position(drone):
 def speed_function(distance):
     # Current function: ln(2x+1) with no values exceeding 4
     speed = math.log(2 * distance + 1)
-    if speed > 2:
-        speed = 2
+    if speed > 4:
+        speed = 4
     return speed
 
 
