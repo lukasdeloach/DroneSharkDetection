@@ -3,11 +3,7 @@
 import asyncio
 import json
 import math
-import os
 import sys
-import tkinter as tk
-from tkinter import *
-
 import cv2
 import torch
 from geopy.distance import great_circle
@@ -21,7 +17,6 @@ from mavsdk.offboard import (
     VelocityBodyYawspeed,
     VelocityNedYaw,
 )
-from PIL import Image, ImageTk
 
 # Initial coordinates
 initial_lat = 29.043192
@@ -184,7 +179,7 @@ async def run():
                       print("Drone is in a good position -- shark is in center frame -- Holding position.")
 
                 await drone.offboard.set_velocity_ned(VelocityNedYaw(speed_y,speed_x,0.0,angle))
-                await asyncio.sleep(2)
+                await asyncio.sleep(12)
                 last_found_location = [location_x, location_y, angle]
                 distance = math.sqrt((origin_x + location_x - pos.position.east_m) ** 2 + (
                     origin_y + location_y - pos.position.north_m) ** 2)
@@ -286,7 +281,6 @@ async def update_location(time_passed):
             cv2.putText(resized_frame, f'{detection_type}: {conf:.2f}', (int(x1), int(y1) - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
-
     first_shark_location = SHARKS[1]
     shark_location_x = shark_location_y = 0
     alert = None
@@ -309,14 +303,20 @@ def normalize_location(object_location):
     box_x, box_y = object_location
     offset_x = box_x - center_x  
     offset_y = -(box_y - center_y)
-    meters_per_pixel = 0.1
-    location_x = offset_x * meters_per_pixel
-    location_y = offset_y * meters_per_pixel
-    print(f"Location ({location_x}, {location_y})")
+
+    # This would have to be calculated based off of the drone/camera altitude
+    # Since I am using an existing video on to simulate the detection, I do not know the altitude at which the video was taken from. 
+    # Therefore, I cannot accurately calculate distance from the video pixels. 
+    # Based off the video, I am estimating 1" per pixel. 
+    inches_per_pixel = 0.1
+
+    location_x = offset_x * inches_per_pixel
+    location_y = offset_y * inches_per_pixel
     return (location_x, location_y)
 
-DANGER_THRESHOLD = 200.0  # Distance threshold for danger (in meters)
-WARNING_THRESHOLD = 400.0  # Distance threshold for warning (in meters)
+
+DANGER_THRESHOLD = 200.0  # Distance threshold for danger (in inches)
+WARNING_THRESHOLD = 400.0  # Distance threshold for warning (in inches)
 def update_alert_based_on_distance(shark_location, persons):
     shark_location_x, shark_location_y = shark_location
     smallest_distance = sys.maxsize
@@ -330,7 +330,7 @@ def update_alert_based_on_distance(shark_location, persons):
         alert = SharkAlert.DANGER
     elif smallest_distance < WARNING_THRESHOLD:
         alert = SharkAlert.WARNING
-    print("smallestdist",smallest_distance)
+    print(f"{alert.value}: There was a detected SHARK {smallest_distance} inches away from a detected PERSON." if alert is not None else "")
     return alert
 
 
@@ -348,7 +348,7 @@ def notify_nearest_stand(drone_location, alert):
         if distance < smallest_distance:
             smallest_distance = distance
             smallest_stand = stand
-    print(f"Notifying this stand {smallest_stand.name}, which is {smallest_distance} away from the detected shark")
+    print(f"Notifying this stand {smallest_stand.name}, which is {smallest_distance}m away from the detected shark")
 
     with open('../frontend/notification.txt', 'w') as file:
         file.write(f"{smallest_stand.name}, {smallest_stand.latitude}, {smallest_stand.longitude}, {distance}, {alert.value + ': ' if alert is not None else ''}")
