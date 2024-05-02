@@ -10,6 +10,7 @@ $(document).ready(function() {
                 var lines = data.split('\n');
                 var notifications = {};
                 lines.forEach(function(line) {
+                    console.log(line)
                     var parts = line.split(', ');
                     var name = parts[0];
                     var lat = parts[1];
@@ -42,6 +43,8 @@ $(document).ready(function() {
             });
             if (isNew || newAlert) {
                 var warningLevel = newNotifications[name].warning;
+                console.log(newNotifications[name])
+                console.log(warningLevel)
                 var notificationText = warningLevel + 'Shark detected near ' + name + ', Lat: ' + newNotifications[name].lat + ', Lng: ' +
                     newNotifications[name].lng + ', distance from stand: ' + Math.ceil(newNotifications[name].distance.split(' ')[0]*1000) +
                     ' m, time: ' + new Date();
@@ -65,8 +68,5 @@ $(document).ready(function() {
         }
     }
     
-    setInterval(fetchNotifications, 500);
-    
-
     setInterval(fetchNotifications, 500);
 });

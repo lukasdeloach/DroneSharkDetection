@@ -25,14 +25,14 @@ initial_lng = -80.897632
 num_stands = 10
 
 # Determine the total number of frames in the video
-video_file = '../images/testVido.mp4'
+video_file = '../images/shark2.mp4'
 vidcap = cv2.VideoCapture(video_file)
 FPS = 50
 total_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
 
 # Calculate the duration of the video in seconds
 # Assuming 'fps' is the frame rate of the video
-video_duration_seconds = total_frames / fps
+video_duration_seconds = total_frames / FPS
 
 # Calculate the time interval between frames for 30 FPS
 time_interval = 1 / 30  # seconds
@@ -44,6 +44,7 @@ THRESHOLD = .125
 # Dictionary to keep track of how many sharks were detected in the entirety of the simulation.
 SHARKS = {}
 
+# Loading up the pre-trained yolov5 model/
 model = torch.hub.load('ultralytics/yolov5', 'custom', path='../best.pt')
 
 
@@ -188,7 +189,7 @@ async def run():
                             "Drone is in a good position -- shark is in center frame -- Holding position.")
 
                     await drone.offboard.set_velocity_ned(VelocityNedYaw(speed_y, speed_x, 0.0, angle))
-                    # await asyncio.sleep(1)
+                    await asyncio.sleep(1)
                     last_found_location = [location_x, location_y, angle]
                     distance = math.sqrt((origin_x + location_x - pos.position.east_m) ** 2 + (
                         origin_y + location_y - pos.position.north_m) ** 2)
@@ -331,8 +332,8 @@ def normalize_location(object_location):
     return (location_x, location_y)
 
 
-DANGER_THRESHOLD = 200.0  # Distance threshold for danger (in inches)
-WARNING_THRESHOLD = 400.0  # Distance threshold for warning (in inches)
+DANGER_THRESHOLD = 300.0  # Distance threshold for danger (in inches)
+WARNING_THRESHOLD = 600.0  # Distance threshold for warning (in inches)
 
 
 def update_alert_based_on_distance(shark_location, persons):
@@ -345,6 +346,7 @@ def update_alert_based_on_distance(shark_location, persons):
             shark_location_x, shark_location_y, person_location_x, person_location_y)
         if distance < smallest_distance:
             smallest_distance = distance
+    print(smallest_distance)
     if smallest_distance < DANGER_THRESHOLD:
         alert = SharkAlert.DANGER
     elif smallest_distance < WARNING_THRESHOLD:
