@@ -4,11 +4,11 @@ import asyncio
 import json
 import math
 import sys
+
 import cv2
 import torch
 from geopy.distance import great_circle
 from LifeguardStand import LifeGuardStand
-from SharkAlerts import SharkAlert
 from mavsdk import System
 from mavsdk.offboard import (
     OffboardError,
@@ -17,6 +17,7 @@ from mavsdk.offboard import (
     VelocityBodyYawspeed,
     VelocityNedYaw,
 )
+from SharkAlerts import SharkAlert
 
 # Initial coordinates
 initial_lat = 29.043192
@@ -305,7 +306,7 @@ async def update_location(time_passed):
         alert = SharkAlert.INFO
         if found_person:
             alert = update_alert_based_on_distance(
-                (shark_box_x, shark_box_y), persons)
+                (shark_location_x, shark_location_y), persons)
 
     cv2.imshow('Shark Detection', resized_frame)
     cv2.waitKey(1)
@@ -332,8 +333,8 @@ def normalize_location(object_location):
     return (location_x, location_y)
 
 
-DANGER_THRESHOLD = 300.0  # Distance threshold for danger (in inches)
-WARNING_THRESHOLD = 600.0  # Distance threshold for warning (in inches)
+DANGER_THRESHOLD = 30.0  # Distance threshold for danger (in feet)
+WARNING_THRESHOLD = 45.0  # Distance threshold for warning (in feet)
 
 
 def update_alert_based_on_distance(shark_location, persons):
@@ -343,7 +344,7 @@ def update_alert_based_on_distance(shark_location, persons):
     for person in persons:
         person_location_x, person_location_y = normalize_location(person)
         distance = calculate_distance_between_objects(
-            shark_location_x, shark_location_y, person_location_x, person_location_y)
+            person_location_x, person_location_y,shark_location_x, shark_location_y)
         if distance < smallest_distance:
             smallest_distance = distance
     print(smallest_distance)
@@ -351,7 +352,7 @@ def update_alert_based_on_distance(shark_location, persons):
         alert = SharkAlert.DANGER
     elif smallest_distance < WARNING_THRESHOLD:
         alert = SharkAlert.WARNING
-    print(f"{alert.value}: There was a detected SHARK {smallest_distance} inches away from a detected PERSON." if alert is not None else "")
+    print(f"{alert.value}: There was a detected SHARK {smallest_distance} feet away from a detected PERSON." if alert is not None else "")
     return alert
 
 
