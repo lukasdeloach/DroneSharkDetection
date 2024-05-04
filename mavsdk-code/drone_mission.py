@@ -19,26 +19,12 @@ from mavsdk.offboard import (
 )
 from SharkAlerts import SharkAlert
 
-# Initial coordinates
-initial_lat = 29.043192
-initial_lng = -80.897632
-# Number of lifeguard stands to populate
-num_stands = 10
-
 # Determine the total number of frames in the video
-video_file = '../images/exampleVideo2.mp4'
-vidcap = cv2.VideoCapture(video_file)
+VIDEO_FILE = '../images/exampleVideo2.mp4'
 FPS = 200
-total_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-# Calculate the duration of the video in seconds
-# Assuming 'fps' is the frame rate of the video
-video_duration_seconds = total_frames / FPS
-
-# Calculate the time interval between frames for 30 FPS
-time_interval = 1 / 30  # seconds
 WIDTH = 800
 HEIGHT = 500
+# Initial coordinates - New Smyrna Beach
 LAT = 29.043192
 LNG = -80.897632
 THRESHOLD = .125
@@ -116,7 +102,7 @@ async def run():
     angle = 90 - math.degrees(math.atan2(location_y, location_x))
     # Calculate drone's distance from the point (Assumes starting at origin)
     distance = math.sqrt(location_x ** 2 + location_y ** 2)
-    # Mark the halfway point from the destination - initially a large value so first run will be true. 
+    # Mark the halfway point from the destination - initially a large value so first run will be true.
     half_distance = 10000
 
     print(f"Detected a Shark! Drone Distance from shark: {distance}. ")
@@ -156,7 +142,8 @@ async def run():
             if found_shark:
                 drone_location = await get_drone_position(drone)
                 notify_nearest_stand(drone_location, alert)
-                if distance < half_distance or (previous_distance < distance and counter > 20):  # If less than halfway to the shark, slow down
+                # If less than halfway to the shark, slow down
+                if distance < half_distance or (previous_distance < distance and counter > 20):
                     print("Drone is very close to the shark -- slowing down.")
                     half_distance = distance / 2
                     await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0.0, 0.0, 0.0, angle))
@@ -165,7 +152,7 @@ async def run():
                 else:
                     print(
                         f"Distance: {distance}, Half Way Distance: {half_distance}, Speed: {speed}")
-                if update_feed:  # If more than halfway, fly towards the shark
+                if update_feed:  # If we reached the halfway point - determine what we do next. 
                     angle = 90-math.degrees(math.atan2(location_y, location_x))
                     origin_x = pos.position.east_m
                     origin_y = pos.position.north_m
@@ -203,7 +190,8 @@ async def run():
                     print(
                         f"Distance: {distance}, Half Way Distance: {half_distance}, Speed: {speed}")
             else:
-                print("There was no shark found. Continuing to fly towards the last position of the detected shark.")
+                print(
+                    "There was no shark found. Continuing to fly towards the last position of the detected shark.")
                 update_feed = True
                 await drone.offboard.set_velocity_ned(VelocityNedYaw(speed_y, speed_x, 0, last_found_location[2]))
 
@@ -227,9 +215,9 @@ async def run():
 
 async def update_location(time_passed):
     global SHARKS  # Access the global SHARKS dictionary
-    persons = []
+    persons = []   # List to hold people found in the frame
 
-    vidcap = cv2.VideoCapture(video_file)
+    vidcap = cv2.VideoCapture(VIDEO_FILE)
     vidcap.set(cv2.CAP_PROP_POS_MSEC, time_passed)
     success, frame = vidcap.read()
     if not success:
@@ -352,7 +340,7 @@ def update_alert_based_on_distance(shark_location, persons):
     for person in persons:
         person_location_x, person_location_y = normalize_location(person)
         distance = calculate_distance_between_objects(
-            person_location_x, person_location_y,shark_location_x, shark_location_y)
+            person_location_x, person_location_y, shark_location_x, shark_location_y)
         if distance < smallest_distance:
             smallest_distance = distance
     if smallest_distance < DANGER_THRESHOLD:
