@@ -131,13 +131,12 @@ async def run():
 
     origin_x = origin_y = 0
     speed_x = speed_y = 0
-    i = counter = j = 0
+    i = counter = 0
     last_found_location = [0, 0, 0]
     update_feed = True
 
     async for pos in drone.telemetry.position_velocity_ned():
         print("\n")
-        j+=1
         if update_feed:
             i += 1
             location = await update_location(i * FPS)
