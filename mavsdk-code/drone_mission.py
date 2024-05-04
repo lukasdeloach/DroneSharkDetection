@@ -91,7 +91,7 @@ async def run():
     await get_drone_position(drone)
 
     # Go east out to ocean first
-    print("-- Go 0m North, 7500m East, -5m Down \
+    print("-- Go 0m North, 250m East, -5m Down \
             within local coordinate system, Turn to face the east")
     await drone.offboard.set_position_ned(
         PositionNedYaw(0.0, 250.0, -10.0, 70.0))
@@ -102,7 +102,7 @@ async def run():
     await asyncio.sleep(5)
 
     # Turning north to scan for sharks
-    print("-- Go 100m North, 0m East, -10m Down \
+    print("-- Go 100m North, 120m East, -10m Down \
             within local coordinate system, Turn to face the North and Scan for Sharks")
     await drone.offboard.set_position_ned(
         PositionNedYaw(100.0, 120.0, -10.0, -15.0))
@@ -116,7 +116,7 @@ async def run():
     angle = 90 - math.degrees(math.atan2(location_y, location_x))
     # Calculate drone's distance from the point (Assumes starting at origin)
     distance = math.sqrt(location_x ** 2 + location_y ** 2)
-    # Mark the halfway point from the destination
+    # Mark the halfway point from the destination - initially a large value so first run will be true. 
     half_distance = 10000
 
     print(f"Detected a Shark! Drone Distance from shark: {distance}. ")
@@ -131,10 +131,9 @@ async def run():
 
     origin_x = origin_y = 0
     speed_x = speed_y = 0
-    i = counter = 0
+    i = counter = j = 0
     last_found_location = [0, 0, 0]
     update_feed = True
-    j = 0
 
     async for pos in drone.telemetry.position_velocity_ned():
         print("\n")
@@ -158,7 +157,7 @@ async def run():
             if found_shark:
                 drone_location = await get_drone_position(drone)
                 notify_nearest_stand(drone_location, alert)
-                if distance < half_distance or (previous_distance < distance and counter > 50):  # If less than halfway to the shark, slow down
+                if distance < half_distance or (previous_distance < distance and counter > 20):  # If less than halfway to the shark, slow down
                     print("Drone is very close to the shark -- slowing down.")
                     half_distance = distance / 2
                     await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0.0, 0.0, 0.0, angle))
